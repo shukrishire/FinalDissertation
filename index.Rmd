@@ -1,9 +1,9 @@
 --- 
-title: "YOUR TITLE HERE"
-author: "YOUR NAME HERE"
+title: "Latent Class Multivariate Analysis"
+author: "Shukri Shire"
 date: "`r Sys.Date()`"
 site: bookdown::bookdown_site
 ---
 
-# Down the rabbit-hole
+# This is index page 
 
