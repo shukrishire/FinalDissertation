@@ -1,0 +1,2221 @@
+--- 
+title: "Latent Class Multivariate Analysis"
+author: "Shukri Shire"
+date: "`r Sys.Date()`"
+site: bookdown::bookdown_site
+editor_options: 
+  chunk_output_type: console
+---
+
+# Initial Analysis
+
+
+```{r, massage=FALSE,echo=FALSE, include=FALSE}
+library("lme4")
+library("lattice")
+library("minqa")
+library("dplyr")
+library("tidyverse")
+library("janitor")
+library("dplyr")
+library("lcmm")
+library("Matrix")
+library("stringr")
+library("reshape2")
+library("ggpubr")
+#library('ClusterR')
+library('cluster')
+library('caret')
+library('factoextra') # clustering visualization
+library('dendextend') # for comparing two dendrograms
+library(dplyr) 
+library(purrr)
+library("modelr")
+library(gtools)
+library(viridis)
+library(viridisLite)
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+setwd("~/Documents/repos/FinalDissertation/FinalDissertation")
+raw_data = read.csv("Acute_Metabolites and Lipids.csv") 
+dim(raw_data)
+data =raw_data[2:534]
+```
+
+
+1- cleaning
+```{r,include=FALSE}
+#install.packages("janitor")
+cleaned_data = clean_names(data)
+cleaned_data$meal =as.numeric(as.factor(cleaned_data$meal))
+cleaned_data$time_mins = as.numeric(cleaned_data$time_mins)
+cleaned_data$gender = as.factor(cleaned_data$gender)
+cleaned_data$patient_id=as.factor(cleaned_data$patient_id)
+cleaned_data$meal = as.factor(cleaned_data$meal)
+cleaned_data$ethnicity= as.factor(cleaned_data$ethnicity)
+
+table(cleaned_data$ethnicity)
+cleaned_data %>%  filter(study_id =="4203" )
+```
+
+```{r,include=FALSE}
+test.data = cleaned_data %>%  select(!c(sequence,left_over,batch,no,visit_nr,initials,age_yrs,weight_kg,height_m,bmi_kg_m2,mri_pancreas_fat_mr_opsy_thresholded,participant))
+glimpse(test.data)
+length(test.data$patient_id)
+unique(test.data$patient_id)
+length(unique(test.data$study_id))
+
+
+length(dim(test.data[7:521]))
+```
+
+*Taking only the metabolites with significant p-values*
+The forloop for all metaboloutes -test loop only 5 metabolotes 
+```{r, include=FALSE,warning=TRUE,results='hide'}
+test.data$time_mins = as.factor(test.data$time_mins)
+var_list <- names(test.data)[8:100]
+length(var_list)
+mod1.0 <- lapply(var_list, function(x) {
+ lmer(substitute(i ~ time_mins+meal+(1|study_id), 
+ list(i = as.name(x))), data = test.data, na.action=na.exclude)
+})
+
+mod2.0 <- lapply(var_list, function(x) {
+ lmer(substitute(i ~ time_mins*meal+(1|study_id), 
+ list(i = as.name(x))), data = test.data, na.action=na.exclude)
+})
+multi_anova = mapply(anova, mod1.0, mod2.0, SIMPLIFY=FALSE)
+p_values = as.list(NULL)
+p_values_like = as.list(NULL)
+for(i in 1:length(multi_anova)){
+   p_values[i]= multi_anova[[i]]$`Pr(>Chisq)`[2]
+}
+
+#p_values
+p_values_like =p_values[p_values <= 0.05]  
+
+pvals = which(p_values <0.05)
+metabolite_sig_df = test.data[,pvals]
+metabolite_sig_df = cbind( test.data[3:7],metabolite_sig_df)
+# colnames(metabolite_sig_df)
+# metabolite_sig_df$time_mins
+metab_df = metabolite_sig_df[,4:8]
+
+all_metab_sig = metabolite_sig_df %>%  select(!c(gender,ethnicity,patient_id,id_meal_time))
+
+all_metab_sig$studyid_time = paste(all_metab_sig$study_id, "-", all_metab_sig$time_mins)
+
+all_metab_sig = all_metab_sig %>%  select(studyid_time,study_id, meal, time_mins,diaminopimelic_acid : x4_hydroxyproline)
+length(all_metab_sig$study_id)
+length(all_metab_sig$study_id)
+
+as.character(colnames(all_metab_sig[5:36]))
+
+xx =all_metab_sig %>% group_by(study_id, time_mins)
+
+review_tab1 = all_metab_sig %>% select( time_mins, meal, diaminopimelic_acid : x4_hydroxyproline)
+head(review_tab1)
+
+
+
+review_tab1$diaminopimelic_acid = as.numeric(review_tab1$diaminopimelic_acid)
+review_tab1$time_mins = as.numeric(review_tab1$time_mins)
+review_tab1$meal = as.numeric(review_tab1$meal)
+
+
+str(review_tab1)
+meal_one = review_tab1 %>%  filter( meal == "1")
+
+v1 = aggregate(meal_one$time_mins~ meal_one$diaminopimelic_acid, FUN =  sum, data =  meal_one[1:3])
+v1$`meal_one$time_mins` = as.factor(v1$`meal_one$time_mins`)
+
+levels( v1$`meal_one$time_mins`) <- c("0", "30", "60", "120", "240")
+
+v1 = aggregate(v1$`meal_one$diaminopimelic_acid` ~ v1$`meal_one$time_mins`, FUN = sum)
+colnames(v1) = c("time", "diaminopimelic_acid")
+v1 %>% pivot_wider(names_from = time, values_from = diaminopimelic_acid)
+
+ggplot(v1, aes(time, diaminopimelic_acid, colour = time)) + 
+  geom_point()
+
+```
+
+
+
+
+```{r}
+rev = all_metab_sig %>% select(study_id, time_mins, meal, diaminopimelic_acid : x4_hydroxyproline)
+colnames(rev)
+summary(rev)
+rev$time = as.factor(rev$time)
+levels( rev$time) <- c("0", "30", "60", "120", "240")
+ggplot(rev, aes(x=time_mins)) + 
+  geom_line(aes(y = diaminopimelic_acid), color="steelblue", linetype="twodash") 
+
+df <- rev %>%   select(time_mins, diaminopimelic_acid, creatine, uridine, acetylcholine, guanine,nitrate ) %>%
+  gather(key = "variable", value = "value", -time_mins)
+head(df)
+cols = rainbow(12)
+
+ggplot(df, aes(x =  time_mins, y = value)) + 
+  geom_line(aes(color = variable, linetype = variable)) + 
+   scale_color_viridis(discrete = TRUE, option = "D")+
+  scale_fill_viridis(discrete = TRUE) +
+  theme_minimal() +
+  theme(legend.position = "bottom")+ labs(title = "Metabolites vs Time",
+      x = "Time (Minutes)", y = "WPI values")
+
+```
+
+
+```{r}
+ meal1 = rev%>%  filter( meal == "1")
+meal1$diaminopimelic_acid = as.numeric(meal1$diaminopimelic_acid)
+meal1$time_mins = as.numeric(meal1$time_mins)
+meal1$meal = as.numeric(meal1$meal)
+v11 = aggregate(meal1$time_mins, by = list(meal1$study_id, meal1$diaminopimelic_acid), FUN =  mean, data =  meal1[1:3])
+colnames(v11) = c("study_id", "diaminopimelic_acid", "time")
+v11$time = as.factor(v11$time)
+levels( v11$time) <- c("0", "30", "60", "120", "240")
+
+
+rev_mini = rev %>% select(c("study_id", "time_mins", "meal",'diaminopimelic_acid', 'creatine', "uridine", "acetylcholine", "guanine","ornithine" )) %>%  
+  mutate_at(c("study_id", "time_mins", "meal",'diaminopimelic_acid', 'creatine', "uridine", "acetylcholine", "guanine","ornithine" ), as.numeric)
+head(rev_mini)
+
+rev$time_mins = as.numeric(rev$time_mins)
+rev$meal = as.numeric(rev$meal)
+
+###################33THIS IS THE UNIVARSAL DF############3
+v12 = aggregate(rev_mini$time_mins, by = list(rev_mini$study_id,
+                                              rev_mini$meal,rev_mini$diaminopimelic_acid,rev_mini$creatine, 
+                                         rev_mini$uridine,rev_mini$acetylcholine,
+                                         rev_mini$guanine, rev_mini$ornithine), FUN =  mean)
+head(v12)
+head(rev_mini)
+colnames(v12) = c("study_id","meal",  "diaminopimelic_acid", "creatine", "uridine", "acetylcholine", "guanine", "ornithine", "time")
+v12$time = as.factor(v12$time)
+levels( v12$time) <- c("0", "30", "60", "120", "240")
+head(v12)
+# meatb1 = v12 %>% pivot_wider(names_from = meal, values_from = diaminopimelic_acid, values_fill = 0)
+
+
+```
+
+
+
+```{r}
+ meal1_mini = rev_mini %>%  filter( meal == "1")
+
+v_mini  = aggregate(rev_mini$time_mins, by = list(rev_mini$study_id, rev_mini$meal, rev_mini$diaminopimelic_acid, rev_mini$creatine, rev_mini$uridine, rev_mini$acetylcholine, rev_mini$guanine, rev_mini$ornithine), FUN =  mean, data =  rev_mini)
+
+colnames(v_mini) = c("study_id","meal", "diaminopimelic_acid", "creatine", "uridine", "acetylcholine", "guanine", "ornithine", "time")
+v_mini$time = as.factor(v_mini$time)
+levels( v_mini$time) <- c("0", "30", "60", "120", "240")
+head(v_mini)
+
+v_mini = v_mini[, c(1,2, 9,  3,4, 6,7,8)]
+
+meatb_all  = v_mini %>% pivot_wider(names_from = meal, values_from = c(diaminopimelic_acid,creatine,acetylcholine,  guanine, ornithine),values_fill = 0)
+
+meatb_df = as.data.frame(meatb_all)
+summary(metab_df)
+test_data_long_tidyr <- pivot_longer(meatb_df[1:5], cols = starts_with("diaminopimelic_acid"))
+
+
+#aggregated so each time point has 1 value 
+m1 = meatb_df[1:5]
+sum_meatb1 =aggregate(cbind(m1$time, m1$study_id) ~ m1$diaminopimelic_acid_1+m1$diaminopimelic_acid_3+m1$diaminopimelic_acid_2 ,FUN = sum ,na.rm = TRUE)
+
+colnames(sum_meatb1) = c("meal1", "meal3", "meal2", "time", "study_id")
+sum_meatb1$time = as.factor(sum_meatb1$time)
+levels(sum_meatb1$time ) <- c("0", "30", "60", "120", "240")
+metab1_df  = sum_meatb1 %>%  filter(study_id == "4203")
+
+```
+
+
+
+
+```{r}
+
+sum_meatb1$time = as.numeric(sum_meatb1$time)
+sum_meatb1$meal1 = as.numeric(sum_meatb1$meal1)
+aggregate(data = sum_meatb1[1:4], sum_meatb1$time ~ sum_meatb1$meal1,FUN = sum)
+```
+
+
+```{r}
+
+v12$meal = as.factor(v12$meal)
+v12$time = as.factor(v12$time)
+
+
+ggplot(data = v12, aes(time,diaminopimelic_acid)) +
+  geom_line(color = "steelblue", size = 1) +
+  geom_point() + 
+  labs(title = "",
+       y = "Diaminopimelic_acid ", x = "Time (Min)") + 
+  facet_wrap(.~meal)
+
+
+v12_2 = v12 %>% filter(study_id =="4201" | study_id =="4203"  | study_id =="4204" |study_id =="4208"  )
+ggplot(data= v12_2,
+       aes(x=time, y= diaminopimelic_acid, colour= meal)) +
+   geom_line(color = "steelblue", size = 1) +
+  geom_point() + 
+ labs(title = "",
+      x = "Time (Minutes)", y = " Diaminopimelic Acid",  color = "Preload Beverages\n") +
+  scale_color_manual(labels = c("Meal 1", "Meal 2", "Meal 3"), values = c("red", "green","blue")) +    facet_wrap(study_id~.)
+
+```
+
+
+```{r}
+
+#THIS IS THE UNIVARSAL DF####
+ggplot(data = v12, aes(time,creatine)) +
+  geom_line(color = "steelblue", size = 1) +
+  geom_point() + 
+  labs(title = "",
+       y = "Creatine ", x = "Time (Min)") + 
+  facet_wrap(.~meal)
+
+
+
+#INDIVIDUAL METAB INFO 
+# m2 = meatb_df[c(1,2,6,7,8)]
+# colnames(m2) = c("study_id", "time", "meal1", "meal3", "meal2")
+# metab2  <- pivot_longer(meatb_df[c(1,2,6,7,8)], cols = starts_with("creatine"))
+# #aggregated so each time point has 1 value 
+# 
+# sum_metab2 =aggregate(cbind(m2$time, m2$study_id) ~ m2$creatine_1+m2$creatine_2+m2$creatine_3,FUN = sum ,na.rm = TRUE)
+# 
+# colnames(sum_metab2) = c("meal1", "meal3", "meal2", "time", "study_id")
+# sum_metab2$time = as.factor(sum_metab2$time)
+# levels(sum_metab2$time ) <- c("0", "30", "60", "120", "240")
+# metab2_df  = sum_metab2 %>%  filter(study_id == "4203")
+# 
+# str(metab2)
+
+
+# metab2_2  = metab2 %>% filter(study_id =="4201" | study_id =="4203"  | study_id =="4204" |study_id =="4208"  )
+# 
+# 
+# ggplot(data= metab2_2,
+#        aes(x=time, y=value, colour=name)) +
+#    geom_line(color = "steelblue", size = 1) +
+#   geom_point() + 
+#  labs(title = "",
+#       x = "Time (Minutes)", y = " Creatine",  color = "Preload Beverages\n") +
+#   scale_color_manual(labels = c("Meal 1", "Meal 2", "Meal 3"), values = c("red", "green","blue")) +    facet_wrap(study_id~.)
+
+
+
+```
+
+2- Set up the data frame 
+*Need to select number of metabolite you want & check the names* 
+```{r}
+metab_names= names(all_metab_sig[,5:36])
+selected_metab = do.call(cbind,all_metab_sig[5:36])
+colnames(selected_metab) 
+glimpse(selected_metab)
+#selected_metab = as.numeric(selected_metab)
+
+
+glimpse(all_metab_sig)
+all_metab_sig$time_mins =as.character(all_metab_sig$time_mins)
+
+ 
+ 
+metab_df = do.call(cbind,list(all_metab_sig$study_id,all_metab_sig$time_mins,all_metab_sig$meal,selected_metab))
+colnames(metab_df)[1]  <- "study_id"
+colnames(metab_df)[2]  <- "time_mins"
+colnames(metab_df)[3]  <- "meal"
+glimpse(metab_df)
+
+# colnames(metab_df)[colnames(metab_df)=="all_metab_sig$study_id"] <- "study_id"
+# colnames(metab_df)[colnames(metab_df)=="all_metab_sig$time_mins"] <- "time_mins"
+# colnames(metab_df)[colnames(metab_df)=="all_metab_sig$meal"] <- "meal"
+
+metab_df =  as.data.frame(metab_df)
+head(metab_df)
+```
+
+*combine to make reshaping easier for whole dataframe*
+```{r}
+#COmbine only needed coloumns 
+metab_df$studyid_time = paste(as.character(metab_df$study_id), "-", as.character(metab_df$time_mins))
+
+#remove unneeded values cuz you combined them in new coloumn 
+metab_df = metab_df %>%  select(!c(time_mins,study_id))
+head(metab_df)
+metab_df$meal = as.factor(metab_df$meal)
+metab_df$diaminopimelic_acid = as.double(metab_df$diaminopimelic_acid)
+metab_df$alpha_l_fucose = as.double(metab_df$alpha_l_fucose)
+```
+
+```{r}
+each_metab = data.frame(matrix(NA, ncol = 5,nrow = 358))
+cols1 <- c('meal', 'studyid_time')
+cols2 <- setdiff(colnames(metab_df), cols1)
+```
+
+
+ make sure all variables are in the same class
+```{r}
+each_metab =lapply(cols2, function(x) metab_df[, c(cols1, x)])
+each_metab =lapply(cols2, function(x) metab_df[, c(cols1, x)])
+glimpse(each_metab)
+class(colnames(selected_metab))
+names_em =lapply(each_metab, function(x) names(x[3]))
+names_em = as.character(names_em)
+```
+Checkj order and same 
+```{r}
+test_match_order <- function(x,y) {
+
+  if (all(x==y)) print('Perfect match in same order')
+
+  if (!all(x==y) && all(sort(x)==sort(y))) print('Perfect match in wrong order')
+
+  if (!all(x==y) && !all(sort(x)==sort(y))) print('No match')
+}
+s = colnames(selected_metab)
+b= names_em
+test_match_order(s,b)
+```
+
+
+```{r}
+f =function(x) as.numeric(x[,3])
+f(each_metab[[1]])
+lapply(each_metab, function(x) as.numeric(x[,3]))  #how to 
+```
+
+```{r}
+#if the $ glutamylthreonine: chr [1:358]  is a charchracter need to change it to numeric 
+# class(each_metab[[6]]$acetylcholine)
+each_metab[[3]]$uridine = as.numeric(each_metab[[3]]$uridine)
+each_metab[[4]]$glutamylthreonine = as.numeric(each_metab[[4]]$glutamylthreonine)
+each_metab[[5]]$x1_methylpyrrolinium = as.numeric(each_metab[[5]]$x1_methylpyrrolinium)
+each_metab[[6]]$acetylcholine = as.numeric(each_metab[[6]]$acetylcholine)
+each_metab[[7]]$l_glutamine = as.numeric(each_metab[[7]]$l_glutamine)
+each_metab[[8]]$n_6_methyllysine = as.numeric(each_metab[[8]]$n_6_methyllysine)
+each_metab[[9]]$suberic_acid = as.numeric(each_metab[[9]]$suberic_acid)
+each_metab[[10]]$guanine = as.numeric(each_metab[[10]]$guanine)
+each_metab[[11]]$myo_inositol = as.numeric(each_metab[[11]]$myo_inositol)
+each_metab[[12]]$l_beta_aspartyl_l_glutamic_acid = as.numeric(each_metab[[12]]$l_beta_aspartyl_l_glutamic_acid)
+each_metab[[13]]$aspartyl_hydroxyproline = as.numeric(each_metab[[13]]$aspartyl_hydroxyproline)
+each_metab[[14]]$x_s_2_hydroxybutyric_acid = as.numeric(each_metab[[14]]$x_s_2_hydroxybutyric_acid)
+each_metab[[15]]$x2_hydroxyadipic_acid = as.numeric(each_metab[[15]]$x2_hydroxyadipic_acid)
+each_metab[[16]]$x3_hexenedioic_acid = as.numeric(each_metab[[16]]$x3_hexenedioic_acid)
+
+
+each_metab[[17]]$l_theanine = as.numeric(each_metab[[17]]$l_theanine)
+
+each_metab[[18]]$oxoglutaric_acid= as.numeric(each_metab[[18]]$oxoglutaric_acid)
+
+each_metab[[19]]$aspartyl_l_proline = as.numeric(each_metab[[19]]$aspartyl_l_proline)
+
+each_metab[[20]]$pyroglutamic_acid = as.numeric(each_metab[[20]]$pyroglutamic_acid)
+
+each_metab[[21]]$l_aspartic_acid = as.numeric(each_metab[[21]]$l_aspartic_acid)
+
+each_metab[[22]]$creatine = as.numeric(each_metab[[22]]$creatine)
+
+each_metab[[23]]$l_glutamic_acid = as.numeric(each_metab[[23]]$l_glutamic_acid)
+each_metab[[24]]$l_lysine = as.numeric(each_metab[[24]]$l_lysine)
+each_metab[[25]]$x2_aminomuconic_acid_semialdehyde = as.numeric(each_metab[[25]]$x2_aminomuconic_acid_semialdehyde)
+
+each_metab[[26]]$methionine_sulfoxide = as.numeric(each_metab[[26]]$methionine_sulfoxide)
+
+each_metab[[27]]$x2_keto_6_acetamidocaproate = as.numeric(each_metab[[27]]$x2_keto_6_acetamidocaproate)
+each_metab[[28]]$thiocyanate= as.numeric(each_metab[[28]]$thiocyanate)
+each_metab[[29]]$nitrate = as.numeric(each_metab[[29]]$nitrate)
+
+each_metab[[30]]$x1_2_3_trihydroxybenzene = as.numeric(each_metab[[30]]$x1_2_3_trihydroxybenzene)
+
+each_metab[[31]]$ornithine = as.numeric(each_metab[[31]]$ornithine)
+
+each_metab[[32]]$x4_hydroxyproline = as.numeric(each_metab[[32]]$x4_hydroxyproline)
+
+
+
+
+
+```
+
+make sure there are no coloumns that have all NA
+```{r}
+each_metab_dfdc= lapply(each_metab, function(x) {melt(x)})
+glimpse(each_metab_dfdc)
+
+each_metab_dfdc=lapply(each_metab_dfdc, function(x) dcast(x,  meal ~ studyid_time, mean))
+length(each_metab_dfdc[[18]])
+```
+
+
+3- Final_DF
+```{r}
+final_df =  data.frame(matrix(NA, ncol = (length(each_metab_dfdc)*3+2), nrow = 96))     # Creating data containing NA
+rep_names =rep(colnames(selected_metab))
+rep_vals = as.numeric(rep(1:3))
+
+
+ last_part = character() 
+first_part = character()
+for(k in rep_names){
+ for(n in rep_vals){
+          output1 = paste("_", k, sep = "")
+             last_part = c(last_part, output1)
+
+              output2  = paste("meal", sep = "", sprintf("%02d",n))
+                first_part = c(first_part, output2)
+}
+
+}
+
+last_part
+first_part
+all_names = mapply(paste, first_part, last_part)
+
+all_names_vec = as.vector(all_names) 
+
+colnames(final_df) = c("study_id", "time_mins", all_names_vec)
+
+for(i in 1:length(each_metab_dfdc)){
+  #gather the values with 0 timepoints
+   zero_timepoint <- grep("- 0$", colnames(each_metab_dfdc[[i]]),value = TRUE)
+   zero_timepoint  <- each_metab_dfdc[[i]][,zero_timepoint]
+
+   #gather the values for other times 
+    nonzero_timepoints <- grep("- 30$|- 60$|- 120$|- 240$", colnames(each_metab_dfdc[[i]]),value = TRUE)
+    nonzero_timepoints= each_metab_dfdc[[i]][,nonzero_timepoints]
+    
+    #combine timepoints
+    all_timepoints_ids <- match(substr(colnames(nonzero_timepoints), 0, 4), substr(colnames(zero_timepoint), 0, 4)) #[-1]
+    zero_timepoint2 <- zero_timepoint[, all_timepoints_ids]
+    df_diff_time = nonzero_timepoints - zero_timepoint2
+    df_diff_time$meal = each_metab_dfdc[[i]]$meal
+
+    
+    #reshape df- the "metabolite" is just a place holder for actual name 
+    final_df_all = df_diff_time %>% pivot_longer(!meal, names_to = "studyid_time", values_to = "metabolite")
+    final_df_all=melt(final_df_all)
+    final_df_all =dcast(final_df_all, studyid_time ~meal, mean)
+    
+    #clean up the names and remove the two NAN
+    # colnames(final_df_all)[colnames(final_df_all)=="1"] <- "meal01"
+    # colnames(final_df_all)[colnames(final_df_all)=="2"] <- "meal02"
+    # colnames(final_df_all)[colnames(final_df_all)=="3"] <- "meal03"
+    final_df_all = final_df_all%>%  separate(studyid_time, c("study_id", "time_mins"))
+
+    #store answer 
+    # print(final_df_all[i])
+    final_df[,1:2] = final_df_all[,1:2]
+    # final_df[,i*3:(i*3+2)] = final_df_all %>% select(meal01,meal02,meal03)
+
+    #print((i*3):(i*3+2))
+    final_df[,(i*3):(i*3+2)] = final_df_all[,3:5]
+
+}
+
+glimpse(final_df)
+any(duplicated(names(final_df))) #tested if colnames are unique FALSE --is wat u want
+
+# mapply(function(X,Y) {
+#   sapply(1:10, function(row) cor(X[row,], Y[row,]))
+#   }, X=listA, Y=listB)
+
+# mapply(function(x,y){paste("meal", sprintf("%02d", var_num), min_names)}, x = var_num, y = min_names)
+
+final_df
+
+```
+
+Reorder the time into 30-60-120-240
+```{r}
+ final_df$study_id = as.integer(final_df$study_id)
+final_df$time_mins = as.character(final_df$time_mins)
+final_df$time_mins = as.numeric(final_df$time_mins)
+# final_df$meal03_uridine = as.integer(final_df$meal03_uridine)
+glimpse(final_df)
+
+final_df=final_df %>%  mutate(final_df, time_mins_st = factor(time_mins, levels = c("30", "60", "120", "240")))   %>%  group_by(study_id) 
+final_df =final_df %>%  group_by(study_id) %>%  arrange(study_id,time_mins_st)
+```
+
+
+DO THIS PART THE LAST: omit and create avg col 
+```{r}
+final_df= na.omit(final_df)
+final_df =final_df %>%  group_by(study_id) %>%  mutate(avg_time = mean(time_mins))
+glimpse(final_df)
+
+```
+
+```{r}
+final_df <- as.data.frame(lapply(final_df, unlist))
+
+
+final_df =as.data.frame(final_df)
+class(final_df)
+glimpse(final_df)
+final_df_copy = final_df
+```
+
+
+
+```{r}
+mini_df_list = list()
+final_df4 = as.data.frame(final_df[3:34])
+colnames(final_df4)
+positions <- c(22:24)
+df_plot = final_df4 %>% select(positions)
+colnames(df_plot)
+new_minidf = cbind(final_df[1:2], df_plot) 
+colnames(new_minidf)
+lt <- c("meal02" = "dash", "meal01" = "dotted","meal03" = "solid" )
+p = ggplot(new_minidf, aes(study_id)) +     
+  geom_line(aes(y = colnames(new_minidf[4]), linetype = "meal01",color = "red", group=1, )) + #mela 02 
+ geom_line(aes(y = colnames(new_minidf[5]), linetype = "meal03",color = "green", group=1)) +  #meal 03 
+  geom_line(aes(y = colnames(new_minidf[3]), linetype = "meal02", color = "blue",group=1)) #meal 01
+    
+
+
+```
+
+
+
+# Mini DF
+```{r}
+final_df3 <- final_df %>% dplyr:: select(time_mins, study_id,starts_with("meal03"))
+glimpse(final_df3)
+dim(final_df3)
+final_df3[1:2]
+colnames(final_df3[3:34])
+mini_df_list = list()
+final_df4 = as.data.frame(final_df3[3:34])
+colnames(final_df4[1:3])
+
+
+```
+
+
+
+<!--chapter:end:index.Rmd-->
+
+# The Multi-LCMM Analaysis 
+
+*Best Link function*
+```{r,cache=TRUE}
+positions <- seq(1:32)
+final_df5 =final_df4 %>% select(positions)
+colnames(final_df5)
+new_minidf = cbind(final_df3[1:2], final_df5) 
+colnames(new_minidf)
+link_fun = vector(mode="list", length=length(positions))
+
+# get the AIC  for all link functions 
+class_lat = c(2,3)
+link_vec = c("splines","beta")
+for(i in 1:length(positions)){
+    link_fun[[i]]<-rep(NA,2)
+  for(k in 1:length(link_vec)){
+    names(new_minidf)[3] <- "metab"
+    new_minidf[,3] = final_df5[i]
+    init = lcmm(metab ~time_mins, subject = "study_id", link = link_vec[k],random  = ~time_mins,
+                data = new_minidf)
+     link_fun[[i]][k]  <-  init$AIC
+  }
+}
+
+link_fun
+
+# Get the best latent class for initial model 
+min_aic2 = list()
+best_link =  data.frame(matrix(NA, ncol = length(link_fun)))
+colnames(best_link) = paste("M-", 1:length(positions), sep = "")
+for(i in 1:length(link_fun)){
+    names(link_fun[[i]]) <- link_vec
+    min_aic2[[i]] = which.min(link_fun[[i]])
+    best_link[,i] =  link_vec[as.numeric(min_aic2[[i]])]
+}
+best_link
+
+
+
+#Get the best Number of latent class *
+
+output_aic_f = vector(mode="list", length=length(positions))
+
+class_lat = c(2,3)
+# link_vec = c("splines","beta")
+for(i in 1:length(positions)){
+    link_fun[[i]]<-rep(NA,2)
+     for(c in 1:length(class_lat)){
+     names(new_minidf)[3] <- "metab"
+     new_minidf[,3] = final_df5[i]
+     init = lcmm(metab ~time_mins, subject = "study_id", link = as.character(best_link[i]),
+                 random  = ~time_mins,
+               data = new_minidf)
+   
+    mond = lcmm(metab ~time_mins, random  = ~time_mins, mixture = ~time_mins, 
+                   ng= as.numeric(class_lat[c]), B = init,
+               subject = "study_id", link = as.character(best_link[i]),data = new_minidf)
+      
+    output_aic_f[[i]][c]  <-  mond$AIC
+
+
+  }
+}
+
+output_aic_f
+
+
+# save(output_aic_f, file="output_aic_f.RData")
+# load("~/Documents/repos/Dissertation_F/Dissertation-F/output_aic_f.RData")
+
+
+min_aic_class  = list()
+best_df =  data.frame(matrix(NA, ncol = length(output_aic_f)))
+colnames(best_df) = paste("M-", 1:length(positions),sep = "")
+for(i in 1:length(output_aic_f)){
+    names(output_aic_f[[i]]) <- class_lat
+    min_aic_class[[i]] = which.min(output_aic_f[[i]])
+    best_df[,i] =  paste(best_link[[i]], class_lat[as.numeric(min_aic_class[[i]])],sep = "-")
+}
+best_df 
+class(best_df)
+#save(best_df, file="labels_summary_FINAL.RData")
+#load("~/Documents/repos/Dissertation_F/Dissertation-F/labels_summary_FINAL.RData")
+
+best_link_f = as.numeric(gsub('[[:alpha:]]+[-]',"", best_df))
+
+
+
+# subset(best_df, grepl('^beta', 
+#                       best_df))
+# best_df[,grepl('^beta', best_df)]
+# 
+# class_two = best_df[,grepl('2$', best_df)]
+# length(class_two)
+# beta2 = class_two[,grepl('^beta', class_two)]
+# length(beta2)
+
+
+```
+
+#final 
+```{r}
+output_final = vector(mode="list", length=length(positions))
+for(i in 1:length(positions)){
+     names(new_minidf)[3] <- "metab"
+     new_minidf[,3] = final_df5[i]
+     init = lcmm(metab ~time_mins, subject = "study_id", link = as.character(best_link[i]),
+                 random  = ~time_mins,
+               data = new_minidf)
+   
+    mond = lcmm(metab ~time_mins, random  = ~time_mins, mixture = ~time_mins, 
+                   ng= as.numeric(best_link_f[i]), B = init,
+               subject = "study_id", link = as.character(best_link[i]),data = new_minidf)
+      
+      output_final[[i]]  <-  mond
+}
+
+ output_final
+# save(output_final, file="output_final.RData")
+#load("~/Documents/repos/Dissertation_F/Dissertation-F/output_final.RData")
+
+
+```
+
+
+```{r}
+#load("~/Documents/repos/Dissertation_F/Dissertation-F/labels_summary_FINAL.RData")
+best_df
+
+#load("~/Documents/repos/Dissertation_F/Dissertation-F/output_final.RData")
+output_final
+
+new_minidf
+```
+
+
+
+
+*Metab 01:metab == meal03._diaminopimelic_acid*
+```{r}
+#mod 1
+init1.0 = lcmm(metab ~time_mins, subject = "study_id", link = "beta",
+                 random  = ~time_mins,
+               data = new_minidf)
+summary(init1.0)
+
+#mod 2
+init2.0  = lcmm(metab ~time_mins, subject = "study_id", link = "splines",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+  
+
+summary(init2.0)
+
+
+#mond3
+init3.0 = lcmm(metab ~time_mins, subject = "study_id", link = "3-quant-splines",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+mond3 = lcmm( metab~time_mins, random  = ~time_mins, mixture = ~time_mins, 
+                   ng= 2, B = init3.0,
+               subject = "study_id", link = "beta",data = new_minidf)
+
+summary(mond3)
+
+
+#mond4
+init4.0  = lcmm(metab ~time_mins, subject = "study_id", link = "5-quant-splines",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+
+
+
+
+init_linkfunc =summarytable(init1.0, init2.0,init3.0, init4.0 ,which = c("loglik", "conv", "npm", "AIC"))
+which.min(init_linkfunc[,4])
+order(init_linkfunc[,4])
+
+rep("c",12)
+col <- rainbow(10)
+#cols = viridis(5)
+#library("viridis") 
+plot(init1.0, which="linkfunction", bty='l', ylab= "meal03._diaminopimelic_acid", col=col[1], lwd=2, xlab="underlying latent process Trouble") #beta= red
+plot(init2.0, which="linkfunction", add=TRUE, col=col[2], lwd=2) #splines - orange
+plot(init3.0, which="linkfunction", add=TRUE, col=col[4], lwd=2) #3quant splines green
+plot(init4.0, which="linkfunction", add=TRUE, col=col[7], lwd=2)#5 quantsplines - dark blue
+
+legend(x="topleft", legend=c("beta", "splines","splines (3equidistant)","splines (5 at quantiles)"), lty=1, col= c(col[1], col[2],col[4],col[7]), bty="n", lwd=2)
+linkbeta <- predictlink(init1.0, ndraws = 2000)
+plot(linkbeta, add = TRUE, col = col[4], lty = 2)
+legend(legend = c("95% confidence bands", "for splines at quantiles"),
+           x = "left", lty = c(2, NA), col = c(col[4], NA), bty = "n", lwd = 1)
+
+
+
+#The best link function based on model ini1.0 
+
+#mod 1: 2 latent classes with beta latent process
+init1.0 = lcmm(metab ~time_mins, subject = "study_id", link = "beta",
+                 random  = ~time_mins,
+               data = new_minidf)
+summary(init1.0)
+
+two_class_metab1 = lcmm( metab~time_mins, random  = ~time_mins, mixture = ~time_mins, 
+                   ng= 2, B = init1.0,
+               subject = "study_id", link = "beta",data = new_minidf)
+
+summary(two_class_metab1)
+postprob(two_class_metab1)
+#mod 2: 3 latent classes with beta latent process 
+init2.0  = lcmm(metab ~time_mins, subject = "study_id", link = "beta",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+    
+
+three_class_metab1 = lcmm( metab~time_mins, random  = ~time_mins, mixture = ~time_mins, 
+                   ng= 3, B = init2.0,
+               subject = "study_id", link = "beta",data = new_minidf)
+
+summary(three_class_metab1)
+postprob(three_class_metab1)
+
+
+mult_classA = summarytable(two_class_metab1,three_class_metab1,which = c("G","loglik", "npm", "AIC", "%class"))
+
+  #summarytable(two_class_metab1,three_class_metab1,which = c("loglik", "conv", "npm", "AIC"))
+which.min(mult_classA[,3])
+order(mult_classA[,3])
+
+postprob(two_class_metab1)
+postprob(three_class_metab1)
+col <- rainbow(10)
+#Predictions  based on both best AIC & Link 
+mond1pred<- predictlink(two_class_metab1,ndraws=2000)
+plot(mond1pred, col=col[4], lty=2, shades=TRUE)
+legend(x="left", legend=c("95% confidence bands","for splines at quantiles"),lty=c(2,NA), col=c(col[4],NA), bty="n", lwd=1, cex=0.8)
+plot(two_class_metab1,cex.main=0.9)
+
+
+#Class trajectories based on both best AIC & Link 
+new_data_time= data.frame(timepred= seq(30,240,by=5)) ##  USE THIS FROM NOW ON 
+new_data_time$time_mins = new_data_time$timepred
+
+predG1 = predictY(init1.0,newdata= new_data_time, var.time = "timepred")
+predG2=predictY(two_class_metab1,newdata= new_data_time, var.time = "timepred")
+predG3=predictY(three_class_metab1,newdata= new_data_time, var.time = "timepred")
+
+par(mfrow = c(1,3))
+plot(predG1, col = 1, lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL, main = "Predicted trajectories G=1", xlim = c(0,300))
+plot(predG2, col = c("red", "navy"), lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL,main = "Predicted trajectories G=2", xlim = c(0,300))
+plot(predG3, col = 2:4, lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL,main = "Predicted trajectories G=3", xlim = c(0,300))
+
+
+
+
+###OTHER METHOD FOR CLASS SPECIFIC TRAJ with CI bands: 3 LC
+predG1.1 = predictY(init1.0,newdata= new_data_time, var.time = "timepred", draws = T)
+
+predG2.2=predictY(two_class_metab1,newdata= new_data_time, var.time = "timepred", draws = T)
+predG3.3=predictY(three_class_metab1,newdata= new_data_time, var.time = "timepred", draws = T)
+
+
+# plot(predG2,lwd = c(3, 1),xlab = "Time Minutes: Simple Metab 01", ylab = "Latent Process: Simple Metab 01")
+
+par(mfrow = c(1,1))
+plot(predG2.2, col = c("red", "navy"), lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL)
+legend(x = "bottomright", legend = c("class 1", "Time Lower ", "time upper", "class 2","Time Lower ", "time upper" ), col = c(rep("red",3), rep("navy",3)), lwd = 2, lty = c(0,1,2,0,1,2), ncol =2, bty = "n", cex = 0.7)
+
+
+plot(predG3.3, lwd = c(3, 1),xlab = "Time Minutes: Simple Metab 01", ylab = "Metab 01", c("red", "navy", "green"), legend = NULL)
+legend(x = "bottomright", legend = c("class 1", "Time Lower ", "time upper", "class 2","Time Lower ", "time upper", "class 3","Time Lower ", "time upper"  ), col = c(rep("red",3), rep("navy",3),rep("green",3)), lwd = 2, lty = c(0,1,2,0,1,2,0,1,2), ncol =3, bty = "n", cex = 0.7)
+
+
+
+
+par(mfrow = c(1,3))
+plot(predG1.1, col = 1, lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL, main = "Predicted trajectories G=1", xlim = c(0,300))
+plot(predG2.2, col = c("red", "navy"), lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL,main = "mean  Predicted trajectories G=2", xlim = c(0,300))
+plot(predG3.3, col = 2:4, lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL,main = "meanPredicted trajectories G=3", xlim = c(0,300))
+
+
+postprob(two_class_metab1)
+
+#Weighted mean of predicted trajectories based on both best AIC & Link 
+par(mfrow = c(1,1))
+plot(three_class_metab1, which = "fit", var.time = "time_mins", xlab = "Time in Minutes: Simple Metab 01",
+     bty = "l", break.times = 5, ylab = "three latent process", lwd = 2, marg = FALSE,
+     ylim = c(-8, 2))
+
+
+par(mfrow = c(1,1))
+plot(two_class_metab1, which = "fit", var.time = "time_mins", xlab = "Time in Minutes",
+     bty = "l", break.times = 6, ylab = "two latent process", lwd = 2, marg = FALSE,
+     ylim = c(-8, 2))
+
+
+
+
+#Choosing the best model: Label switching look 
+
+label_switching = summarytable(init1.0,two_class_metab1,three_class_metab1, which = c("G", "loglik", "conv", "npm", "AIC", "BIC", "SABIC", "entropy","ICL", "%class"))
+
+
+
+summaryplot(init1.0,two_class_metab1,three_class_metab1,which = c("AIC", "BIC", "entropy","ICL"))
+
+order(label_switching[,5])
+order(label_switching[,7])
+
+
+
+
+
+
+
+
+```
+
+
+
+
+*Metab 02:meal03._alpha_l_fucose*
+```{r}
+
+#mod 1
+init1.0b = lcmm(meal03._alpha_l_fucose ~time_mins, subject = "study_id", link = "beta",
+                 random  = ~time_mins,
+               data = new_minidf)
+summary(init1.0b)
+#mod 2
+init2.0b  = lcmm( meal03._alpha_l_fucose ~time_mins, subject = "study_id", link = "splines",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+    
+#mond3
+init3.0b = lcmm( meal03._alpha_l_fucose ~time_mins, subject = "study_id", link = "3-quant-splines",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+
+#mond4
+init4.0b  = lcmm(meal03._alpha_l_fucose  ~time_mins, subject = "study_id", link = "5-quant-splines",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+
+
+init_linkfunc_b =summarytable(init1.0b, init2.0b,init3.0b, init4.0b ,which = c("loglik", "conv", "npm", "AIC"))
+which.min(init_linkfunc_b[,4])
+order(init_linkfunc_b[,4])
+
+
+col <- rainbow(10)
+
+plot(init1.0b, which="linkfunction", bty='l', ylab= "meal03._alpha_l_fucose", col=col[1], lwd=2, xlab="underlying latent process Trouble") #beta= red
+plot(init2.0b, which="linkfunction", add=TRUE, col=col[2], lwd=2) #splines - orange
+plot(init3.0b, which="linkfunction", add=TRUE, col=col[4], lwd=2) #3quant splines green
+plot(init4.0b, which="linkfunction", add=TRUE, col=col[7], lwd=2)#5 quantsplines - dark blue
+
+legend(x="topleft", legend=c("beta", "splines","splines (3equidistant)","splines (5 at quantiles)"), lty=1, col= c(col[1], col[2],col[4],col[7]), bty="n", lwd=2)
+
+
+#The best link function based on model ini1.0 
+
+#mod 1
+init2.0b  = lcmm( meal03._alpha_l_fucose ~time_mins, subject = "study_id", link = "splines",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+summary(init2.0b)
+
+two_class_metab2 = lcmm( meal03._alpha_l_fucose ~time_mins, random  = ~time_mins, mixture = ~time_mins, 
+                   ng= 2, B = init2.0b,
+               subject = "study_id", link = "splines",data = new_minidf)
+
+summary(two_class_metab2)
+postprob(two_class_metab2)
+#mod 2
+#mod 1
+init2.0b  = lcmm( meal03._alpha_l_fucose ~time_mins, subject = "study_id", link = "splines",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+summary(init2.0b)
+    
+
+three_class_metab2 = lcmm( metab~time_mins, random  = ~time_mins, mixture = ~time_mins, 
+                   ng= 3, B = init2.0b,
+               subject = "study_id", link = "splines",data = new_minidf)
+
+summary(three_class_metab2)
+postprob(three_class_metab2)
+
+mult_classB =summarytable(two_class_metab2,three_class_metab2,which = c("G","loglik", "npm", "AIC", "%class"))
+which.min(mult_classB[,3])
+order(mult_classB[,4])
+
+col <- rainbow(10)
+#Predictions  based on both best AIC & Link 
+mond1pred_b<- predictlink(two_class_metab2,ndraws=2000)
+plot(mond1pred_b, col=col[4], lty=2, shades=TRUE)
+legend(x="left", legend=c("95% confidence bands","for splines at quantiles"),lty=c(2,NA), col=c(col[4],NA), bty="n", lwd=1, cex=0.8)
+plot(two_class_metab2,cex.main=0.9)
+
+
+#Class trajectories based on both best AIC & Link 
+new_data_time= data.frame(timepred= seq(30,240,by=5)) ##  USE THIS FROM NOW ON 
+new_data_time$time_mins = new_data_time$timepred
+pred_meta_1 = predictY(init2.0b,newdata= new_data_time, var.time = "timepred")
+pred_met_2=predictY(two_class_metab2,newdata= new_data_time, var.time = "timepred")
+pred_met_3=predictY(three_class_metab2,newdata= new_data_time, var.time = "timepred")
+
+
+
+
+
+
+par(mfrow = c(1,3))
+plot(pred_meta_1, col = 1, lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL, main = "Predicted trajectories G=1", xlim = c(0,300))
+plot(pred_met_2, col = c("red", "navy"), lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL,main = "mean  Predicted trajectories G=2", xlim = c(0,300))
+plot(pred_met_3, col = 2:4, lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL,main = "meanPredicted trajectories G=3", xlim = c(0,300))
+
+
+
+#Weighted mean of predicted trajectories based on both best AIC & Link 
+class(predG2$times)
+
+plot(pred_met_2,lwd = c(3, 1),xlab = "Time Minutes: Trouble Metab 02", ylab = "Latent Process: Trouble  Metab 02")
+plot(pred_met_3, lwd = c(3, 1),xlab = "Time Minutes: Trouble Metab 02", ylab = "Latent Process: Trouble Metab 02")
+
+
+
+#Goodness of Fit || col= c(col[2], col[4], col[7])
+plot(three_class_metab2, which = "fit", var.time = "time_mins", xlab = "Time in Minutes: Complex Metab 02",
+     bty = "l", break.times = 5, ylab = "latent process", lwd = 2, marg = FALSE,
+     ylim = c(-5, 2))
+
+
+label_switching2 = summarytable(init2.0b,two_class_metab2,three_class_metab2, which = c("G", "loglik", "conv", "npm", "AIC", "BIC", "SABIC", "entropy","ICL", "%class"))
+
+summaryplot(init2.0b,two_class_metab2,three_class_metab2,which = c("AIC", "BIC", "entropy","ICL"))
+label_switching2
+order(label_switching2[,5])
+order(label_switching2[,6])
+order(label_switching2[,7])
+
+
+
+
+
+
+```
+
+
+<!--chapter:end:02-lcmm.Rmd-->
+
+# The Mult-Lccmm Analysis
+
+
+<!--chapter:end:03-multlcmm.Rmd-->
+
+---
+title: "STATS PROJECT 2022-Multi-stuff-metabolite"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    toc: yes
+pagetitle: Habits
+editor_options:
+  chunk_output_type: console
+---
+
+```{r, massage=FALSE,echo=FALSE, include=FALSE}
+library("lme4")
+library("lattice")
+library("minqa")
+library("dplyr")
+library("tidyverse")
+library("janitor")
+library("dplyr")
+library("lcmm")
+library("Matrix")
+library("stringr")
+library("reshape2")
+library("ggpubr")
+#library('ClusterR')
+library('cluster')
+library('caret')
+library('factoextra') # clustering visualization
+library('dendextend') # for comparing two dendrograms
+library(dplyr) 
+library(purrr)
+library("modelr")
+library(gtools)
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+setwd("~/Documents/repos/Dissertation_F/Dissertation-F")
+raw_data = read.csv("Acute_Metabolites and Lipids.csv") # nolint
+dim(raw_data)
+data =raw_data[2:534]
+length(unique(data$Study.ID))
+glimpse(data)
+
+View(data)
+```
+
+
+1- cleaning
+```{r,include=FALSE}
+#install.packages("janitor")
+cleaned_data = clean_names(data)
+cleaned_data$meal =as.numeric(as.factor(cleaned_data$meal))
+cleaned_data$time_mins = as.numeric(cleaned_data$time_mins)
+cleaned_data$gender = as.factor(cleaned_data$gender)
+cleaned_data$patient_id=as.factor(cleaned_data$patient_id)
+cleaned_data$meal = as.factor(cleaned_data$meal)
+cleaned_data$ethnicity= as.factor(cleaned_data$ethnicity)
+
+table(cleaned_data$ethnicity)
+view(cleaned_data)
+
+cleaned_data %>%  filter(study_id =="4203" )
+```
+
+```{r,include=FALSE}
+test.data = cleaned_data %>%  select(!c(sequence,left_over,batch,no,visit_nr,initials,age_yrs,weight_kg,height_m,bmi_kg_m2,mri_pancreas_fat_mr_opsy_thresholded,participant))
+glimpse(test.data)
+length(test.data$patient_id)
+unique(test.data$patient_id)
+length(unique(test.data$study_id))
+
+
+length(dim(test.data[7:521]))
+```
+
+*Taking only the metabolites with significant p-values*
+The forloop for all metaboloutes -test loop only 5 metabolotes 
+```{r, include=FALSE,warning=TRUE,results='hide'}
+test.data$time_mins = as.factor(test.data$time_mins)
+var_list <- names(test.data)[8:100]
+length(var_list)
+mod1.0 <- lapply(var_list, function(x) {
+ lmer(substitute(i ~ time_mins+meal+(1|study_id), 
+ list(i = as.name(x))), data = test.data, na.action=na.exclude)
+})
+
+mod2.0 <- lapply(var_list, function(x) {
+ lmer(substitute(i ~ time_mins*meal+(1|study_id), 
+ list(i = as.name(x))), data = test.data, na.action=na.exclude)
+})
+multi_anova = mapply(anova, mod1.0, mod2.0, SIMPLIFY=FALSE)
+p_values = as.list(NULL)
+p_values_like = as.list(NULL)
+for(i in 1:length(multi_anova)){
+   p_values[i]= multi_anova[[i]]$`Pr(>Chisq)`[2]
+}
+
+#p_values
+p_values_like =p_values[p_values <= 0.05]  
+
+pvals = which(p_values <0.05)
+metabolite_sig_df = test.data[,pvals]
+metabolite_sig_df = cbind( test.data[3:7],metabolite_sig_df)
+# colnames(metabolite_sig_df)
+# metabolite_sig_df$time_mins
+metab_df = metabolite_sig_df[,4:8]
+
+all_metab_sig = metabolite_sig_df %>%  select(!c(gender,ethnicity,patient_id,id_meal_time))
+
+all_metab_sig$studyid_time = paste(all_metab_sig$study_id, "-", all_metab_sig$time_mins)
+
+all_metab_sig = all_metab_sig %>%  select(studyid_time,study_id, meal, time_mins,diaminopimelic_acid : x4_hydroxyproline)
+length(all_metab_sig$study_id)
+length(all_metab_sig$study_id)
+
+as.character(colnames(all_metab_sig[5:36]))
+
+xx =all_metab_sig %>% group_by(study_id, time_mins)
+
+review_tab1 = all_metab_sig %>% select( time_mins, meal, diaminopimelic_acid : x4_hydroxyproline)
+head(review_tab1)
+
+
+
+review_tab1$diaminopimelic_acid = as.numeric(review_tab1$diaminopimelic_acid)
+review_tab1$time_mins = as.numeric(review_tab1$time_mins)
+review_tab1$meal = as.numeric(review_tab1$meal)
+
+
+str(review_tab1)
+meal_one = review_tab1 %>%  filter( meal == "1")
+
+v1 = aggregate(meal_one$time_mins~ meal_one$diaminopimelic_acid, FUN =  sum, data =  meal_one[1:3])
+v1$`meal_one$time_mins` = as.factor(v1$`meal_one$time_mins`)
+
+levels( v1$`meal_one$time_mins`) <- c("0", "30", "60", "120", "240")
+
+v1 = aggregate(v1$`meal_one$diaminopimelic_acid` ~ v1$`meal_one$time_mins`, FUN = sum)
+colnames(v1) = c("time", "diaminopimelic_acid")
+v1 %>% pivot_wider(names_from = time, values_from = diaminopimelic_acid)
+
+ggplot(v1, aes(time, diaminopimelic_acid, colour = time)) + 
+  geom_point()
+
+```
+
+
+
+
+```{r}
+rev = all_metab_sig %>% select(study_id, time_mins, meal, diaminopimelic_acid : x4_hydroxyproline)
+colnames(rev)
+summary(rev)
+rev$time = as.factor(rev$time)
+levels( rev$time) <- c("0", "30", "60", "120", "240")
+ggplot(rev, aes(x=time_mins)) + 
+  geom_line(aes(y = diaminopimelic_acid), color="steelblue", linetype="twodash") 
+
+df <- rev %>%   select(time_mins, diaminopimelic_acid, creatine, uridine, acetylcholine, guanine,nitrate ) %>%
+  gather(key = "variable", value = "value", -time_mins)
+head(df)
+cols = rainbow(12)
+
+ggplot(df, aes(x =  time_mins, y = value)) + 
+  geom_line(aes(color = variable, linetype = variable)) + 
+   scale_color_viridis(discrete = TRUE, option = "D")+
+  scale_fill_viridis(discrete = TRUE) +
+  theme_minimal() +
+  theme(legend.position = "bottom")+ labs(title = "Metabolites vs Time",
+      x = "Time (Minutes)", y = "WPI values")
+
+```
+
+
+
+
+```{r}
+ meal1 = rev%>%  filter( meal == "1")
+meal1$diaminopimelic_acid = as.numeric(meal1$diaminopimelic_acid)
+meal1$time_mins = as.numeric(meal1$time_mins)
+meal1$meal = as.numeric(meal1$meal)
+v11 = aggregate(meal1$time_mins, by = list(meal1$study_id, meal1$diaminopimelic_acid), FUN =  mean, data =  meal1[1:3])
+colnames(v11) = c("study_id", "diaminopimelic_acid", "time")
+v11$time = as.factor(v11$time)
+levels( v11$time) <- c("0", "30", "60", "120", "240")
+
+
+rev_mini = rev %>% select(c("study_id", "time_mins", "meal",'diaminopimelic_acid', 'creatine', "uridine", "acetylcholine", "guanine","ornithine" )) %>%  
+  mutate_at(c("study_id", "time_mins", "meal",'diaminopimelic_acid', 'creatine', "uridine", "acetylcholine", "guanine","ornithine" ), as.numeric)
+head(rev_mini)
+
+rev$time_mins = as.numeric(rev$time_mins)
+rev$meal = as.numeric(rev$meal)
+
+###################33THIS IS THE UNIVARSAL DF############3
+v12 = aggregate(rev_mini$time_mins, by = list(rev_mini$study_id,
+                                              rev_mini$meal,rev_mini$diaminopimelic_acid,rev_mini$creatine, 
+                                         rev_mini$uridine,rev_mini$acetylcholine,
+                                         rev_mini$guanine, rev_mini$ornithine), FUN =  mean)
+head(v12)
+head(rev_mini)
+colnames(v12) = c("study_id","meal",  "diaminopimelic_acid", "creatine", "uridine", "acetylcholine", "guanine", "ornithine", "time")
+v12$time = as.factor(v12$time)
+levels( v12$time) <- c("0", "30", "60", "120", "240")
+head(v12)
+# meatb1 = v12 %>% pivot_wider(names_from = meal, values_from = diaminopimelic_acid, values_fill = 0)
+
+
+```
+
+
+
+```{r}
+ meal1_mini = rev_mini %>%  filter( meal == "1")
+
+v_mini  = aggregate(rev_mini$time_mins, by = list(rev_mini$study_id, rev_mini$meal, rev_mini$diaminopimelic_acid, rev_mini$creatine, rev_mini$uridine, rev_mini$acetylcholine, rev_mini$guanine, rev_mini$ornithine), FUN =  mean, data =  rev_mini)
+
+colnames(v_mini) = c("study_id","meal", "diaminopimelic_acid", "creatine", "uridine", "acetylcholine", "guanine", "ornithine", "time")
+v_mini$time = as.factor(v_mini$time)
+levels( v_mini$time) <- c("0", "30", "60", "120", "240")
+head(v_mini)
+
+v_mini = v_mini[, c(1,2, 9,  3,4, 6,7,8)]
+
+meatb_all  = v_mini %>% pivot_wider(names_from = meal, values_from = c(diaminopimelic_acid,creatine,acetylcholine,  guanine, ornithine),values_fill = 0)
+
+meatb_df = as.data.frame(meatb_all)
+summary(metab_df)
+test_data_long_tidyr <- pivot_longer(meatb_df[1:5], cols = starts_with("diaminopimelic_acid"))
+
+
+# ggplot(data=test_data_long_tidyr,
+#        aes(x=time, y=value, colour=name)) +
+#   geom_line()
+# 
+# 
+# 
+# ggplot(data=test_data_long_tidyr,
+#        aes(x=time, y=value, colour=name)) +
+#    geom_line(color = "steelblue", size = 1) +
+#   geom_point() + 
+#     facet_wrap(study_id~.)
+
+
+#aggregated so each time point has 1 value 
+m1 = meatb_df[1:5]
+sum_meatb1 =aggregate(cbind(m1$time, m1$study_id) ~ m1$diaminopimelic_acid_1+m1$diaminopimelic_acid_3+m1$diaminopimelic_acid_2 ,FUN = sum ,na.rm = TRUE)
+
+colnames(sum_meatb1) = c("meal1", "meal3", "meal2", "time", "study_id")
+sum_meatb1$time = as.factor(sum_meatb1$time)
+levels(sum_meatb1$time ) <- c("0", "30", "60", "120", "240")
+metab1_df  = sum_meatb1 %>%  filter(study_id == "4203")
+
+```
+
+
+
+
+
+
+
+
+
+
+```{r}
+
+sum_meatb1$time = as.numeric(sum_meatb1$time)
+sum_meatb1$meal1 = as.numeric(sum_meatb1$meal1)
+aggregate(data = sum_meatb1[1:4], sum_meatb1$time ~ sum_meatb1$meal1,FUN = sum)
+```
+
+
+```{r}
+
+v12$meal = as.factor(v12$meal)
+v12$time = as.factor(v12$time)
+
+
+ggplot(data = v12, aes(time,diaminopimelic_acid)) +
+  geom_line(color = "steelblue", size = 1) +
+  geom_point() + 
+  labs(title = "",
+       y = "Diaminopimelic_acid ", x = "Time (Min)") + 
+  facet_wrap(.~meal)
+
+
+v12_2 = v12 %>% filter(study_id =="4201" | study_id =="4203"  | study_id =="4204" |study_id =="4208"  )
+ggplot(data= v12_2,
+       aes(x=time, y= diaminopimelic_acid, colour= meal)) +
+   geom_line(color = "steelblue", size = 1) +
+  geom_point() + 
+ labs(title = "",
+      x = "Time (Minutes)", y = " Diaminopimelic Acid",  color = "Preload Beverages\n") +
+  scale_color_manual(labels = c("Meal 1", "Meal 2", "Meal 3"), values = c("red", "green","blue")) +    facet_wrap(study_id~.)
+
+```
+
+
+```{r}
+
+#THIS IS THE UNIVARSAL DF####
+ggplot(data = v12, aes(time,creatine)) +
+  geom_line(color = "steelblue", size = 1) +
+  geom_point() + 
+  labs(title = "",
+       y = "Creatine ", x = "Time (Min)") + 
+  facet_wrap(.~meal)
+
+
+
+#INDIVIDUAL METAB INFO 
+m2 = meatb_df[c(1,2,6,7,8)]
+colnames(m2) = c("study_id", "time", "meal1", "meal3", "meal2")
+metab2  <- pivot_longer(meatb_df[c(1,2,6,7,8)], cols = starts_with("creatine"))
+#aggregated so each time point has 1 value 
+
+sum_metab2 =aggregate(cbind(m2$time, m2$study_id) ~ m2$creatine_1+m2$creatine_2+m2$creatine_3,FUN = sum ,na.rm = TRUE)
+
+colnames(sum_metab2) = c("meal1", "meal3", "meal2", "time", "study_id")
+sum_metab2$time = as.factor(sum_metab2$time)
+levels(sum_metab2$time ) <- c("0", "30", "60", "120", "240")
+metab2_df  = sum_metab2 %>%  filter(study_id == "4203")
+
+str(metab2)
+
+
+
+
+
+
+
+
+metab2_2  = metab2 %>% filter(study_id =="4201" | study_id =="4203"  | study_id =="4204" |study_id =="4208"  )
+
+
+ggplot(data= metab2_2,
+       aes(x=time, y=value, colour=name)) +
+   geom_line(color = "steelblue", size = 1) +
+  geom_point() + 
+ labs(title = "",
+      x = "Time (Minutes)", y = " Creatine",  color = "Preload Beverages\n") +
+  scale_color_manual(labels = c("Meal 1", "Meal 2", "Meal 3"), values = c("red", "green","blue")) +    facet_wrap(study_id~.)
+
+
+
+```
+
+2- Set up the data frame 
+*Need to select number of metabolite you want & check the names* 
+```{r}
+metab_names= names(all_metab_sig[,5:36])
+selected_metab = do.call(cbind,all_metab_sig[5:36])
+colnames(selected_metab) 
+glimpse(selected_metab)
+#selected_metab = as.numeric(selected_metab)
+
+
+glimpse(all_metab_sig)
+all_metab_sig$time_mins =as.character(all_metab_sig$time_mins)
+
+ 
+ 
+metab_df = do.call(cbind,list(all_metab_sig$study_id,all_metab_sig$time_mins,all_metab_sig$meal,selected_metab))
+colnames(metab_df)[1]  <- "study_id"
+colnames(metab_df)[2]  <- "time_mins"
+colnames(metab_df)[3]  <- "meal"
+glimpse(metab_df)
+
+# colnames(metab_df)[colnames(metab_df)=="all_metab_sig$study_id"] <- "study_id"
+# colnames(metab_df)[colnames(metab_df)=="all_metab_sig$time_mins"] <- "time_mins"
+# colnames(metab_df)[colnames(metab_df)=="all_metab_sig$meal"] <- "meal"
+
+metab_df =  as.data.frame(metab_df)
+head(metab_df)
+```
+
+*combine to make reshaping easier for whole dataframe*
+```{r}
+#COmbine only needed coloumns 
+metab_df$studyid_time = paste(as.character(metab_df$study_id), "-", as.character(metab_df$time_mins))
+
+#remove unneeded values cuz you combined them in new coloumn 
+metab_df = metab_df %>%  select(!c(time_mins,study_id))
+head(metab_df)
+metab_df$meal = as.factor(metab_df$meal)
+metab_df$diaminopimelic_acid = as.double(metab_df$diaminopimelic_acid)
+metab_df$alpha_l_fucose = as.double(metab_df$alpha_l_fucose)
+```
+
+```{r}
+each_metab = data.frame(matrix(NA, ncol = 5,nrow = 358))
+cols1 <- c('meal', 'studyid_time')
+cols2 <- setdiff(colnames(metab_df), cols1)
+```
+
+
+ make sure all variables are in the same class
+```{r}
+each_metab =lapply(cols2, function(x) metab_df[, c(cols1, x)])
+each_metab =lapply(cols2, function(x) metab_df[, c(cols1, x)])
+glimpse(each_metab)
+class(colnames(selected_metab))
+names_em =lapply(each_metab, function(x) names(x[3]))
+names_em = as.character(names_em)
+```
+Checkj order and same 
+```{r}
+test_match_order <- function(x,y) {
+
+  if (all(x==y)) print('Perfect match in same order')
+
+  if (!all(x==y) && all(sort(x)==sort(y))) print('Perfect match in wrong order')
+
+  if (!all(x==y) && !all(sort(x)==sort(y))) print('No match')
+}
+s = colnames(selected_metab)
+b= names_em
+test_match_order(s,b)
+```
+
+
+```{r}
+f =function(x) as.numeric(x[,3])
+f(each_metab[[1]])
+lapply(each_metab, function(x) as.numeric(x[,3]))  #how to 
+```
+
+```{r}
+#if the $ glutamylthreonine: chr [1:358]  is a charchracter need to change it to numeric 
+# class(each_metab[[6]]$acetylcholine)
+each_metab[[3]]$uridine = as.numeric(each_metab[[3]]$uridine)
+each_metab[[4]]$glutamylthreonine = as.numeric(each_metab[[4]]$glutamylthreonine)
+each_metab[[5]]$x1_methylpyrrolinium = as.numeric(each_metab[[5]]$x1_methylpyrrolinium)
+each_metab[[6]]$acetylcholine = as.numeric(each_metab[[6]]$acetylcholine)
+each_metab[[7]]$l_glutamine = as.numeric(each_metab[[7]]$l_glutamine)
+each_metab[[8]]$n_6_methyllysine = as.numeric(each_metab[[8]]$n_6_methyllysine)
+each_metab[[9]]$suberic_acid = as.numeric(each_metab[[9]]$suberic_acid)
+each_metab[[10]]$guanine = as.numeric(each_metab[[10]]$guanine)
+each_metab[[11]]$myo_inositol = as.numeric(each_metab[[11]]$myo_inositol)
+each_metab[[12]]$l_beta_aspartyl_l_glutamic_acid = as.numeric(each_metab[[12]]$l_beta_aspartyl_l_glutamic_acid)
+each_metab[[13]]$aspartyl_hydroxyproline = as.numeric(each_metab[[13]]$aspartyl_hydroxyproline)
+each_metab[[14]]$x_s_2_hydroxybutyric_acid = as.numeric(each_metab[[14]]$x_s_2_hydroxybutyric_acid)
+each_metab[[15]]$x2_hydroxyadipic_acid = as.numeric(each_metab[[15]]$x2_hydroxyadipic_acid)
+each_metab[[16]]$x3_hexenedioic_acid = as.numeric(each_metab[[16]]$x3_hexenedioic_acid)
+
+
+each_metab[[17]]$l_theanine = as.numeric(each_metab[[17]]$l_theanine)
+
+each_metab[[18]]$oxoglutaric_acid= as.numeric(each_metab[[18]]$oxoglutaric_acid)
+
+each_metab[[19]]$aspartyl_l_proline = as.numeric(each_metab[[19]]$aspartyl_l_proline)
+
+each_metab[[20]]$pyroglutamic_acid = as.numeric(each_metab[[20]]$pyroglutamic_acid)
+
+each_metab[[21]]$l_aspartic_acid = as.numeric(each_metab[[21]]$l_aspartic_acid)
+
+each_metab[[22]]$creatine = as.numeric(each_metab[[22]]$creatine)
+
+each_metab[[23]]$l_glutamic_acid = as.numeric(each_metab[[23]]$l_glutamic_acid)
+each_metab[[24]]$l_lysine = as.numeric(each_metab[[24]]$l_lysine)
+each_metab[[25]]$x2_aminomuconic_acid_semialdehyde = as.numeric(each_metab[[25]]$x2_aminomuconic_acid_semialdehyde)
+
+each_metab[[26]]$methionine_sulfoxide = as.numeric(each_metab[[26]]$methionine_sulfoxide)
+
+each_metab[[27]]$x2_keto_6_acetamidocaproate = as.numeric(each_metab[[27]]$x2_keto_6_acetamidocaproate)
+each_metab[[28]]$thiocyanate= as.numeric(each_metab[[28]]$thiocyanate)
+each_metab[[29]]$nitrate = as.numeric(each_metab[[29]]$nitrate)
+
+each_metab[[30]]$x1_2_3_trihydroxybenzene = as.numeric(each_metab[[30]]$x1_2_3_trihydroxybenzene)
+
+each_metab[[31]]$ornithine = as.numeric(each_metab[[31]]$ornithine)
+
+each_metab[[32]]$x4_hydroxyproline = as.numeric(each_metab[[32]]$x4_hydroxyproline)
+
+
+
+
+
+```
+
+make sure there are no coloumns that have all NA
+```{r}
+each_metab_dfdc= lapply(each_metab, function(x) {melt(x)})
+glimpse(each_metab_dfdc)
+
+each_metab_dfdc=lapply(each_metab_dfdc, function(x) dcast(x,  meal ~ studyid_time, mean))
+length(each_metab_dfdc[[18]])
+```
+
+
+```{r}
+x = each_metab_dfdc[[18]][1]
+y = each_metab_dfdc[[18]][2:121]
+ggplot(each_metab_dfdc[[18]], aes(x = meal)) + geom_point()
+```
+
+
+
+
+3- Final_DF
+```{r}
+final_df =  data.frame(matrix(NA, ncol = (length(each_metab_dfdc)*3+2), nrow = 96))     # Creating data containing NA
+rep_names =rep(colnames(selected_metab))
+rep_vals = as.numeric(rep(1:3))
+
+
+ last_part = character() 
+first_part = character()
+for(k in rep_names){
+ for(n in rep_vals){
+          output1 = paste("_", k, sep = "")
+             last_part = c(last_part, output1)
+
+              output2  = paste("meal", sep = "", sprintf("%02d",n))
+                first_part = c(first_part, output2)
+}
+
+}
+
+last_part
+first_part
+all_names = mapply(paste, first_part, last_part)
+
+all_names_vec = as.vector(all_names) 
+
+colnames(final_df) = c("study_id", "time_mins", all_names_vec)
+
+for(i in 1:length(each_metab_dfdc)){
+  #gather the values with 0 timepoints
+   zero_timepoint <- grep("- 0$", colnames(each_metab_dfdc[[i]]),value = TRUE)
+   zero_timepoint  <- each_metab_dfdc[[i]][,zero_timepoint]
+
+   #gather the values for other times 
+    nonzero_timepoints <- grep("- 30$|- 60$|- 120$|- 240$", colnames(each_metab_dfdc[[i]]),value = TRUE)
+    nonzero_timepoints= each_metab_dfdc[[i]][,nonzero_timepoints]
+    
+    #combine timepoints
+    all_timepoints_ids <- match(substr(colnames(nonzero_timepoints), 0, 4), substr(colnames(zero_timepoint), 0, 4)) #[-1]
+    zero_timepoint2 <- zero_timepoint[, all_timepoints_ids]
+    df_diff_time = nonzero_timepoints - zero_timepoint2
+    df_diff_time$meal = each_metab_dfdc[[i]]$meal
+
+    
+    #reshape df- the "metabolite" is just a place holder for actual name 
+    final_df_all = df_diff_time %>% pivot_longer(!meal, names_to = "studyid_time", values_to = "metabolite")
+    final_df_all=melt(final_df_all)
+    final_df_all =dcast(final_df_all, studyid_time ~meal, mean)
+    
+    #clean up the names and remove the two NAN
+    # colnames(final_df_all)[colnames(final_df_all)=="1"] <- "meal01"
+    # colnames(final_df_all)[colnames(final_df_all)=="2"] <- "meal02"
+    # colnames(final_df_all)[colnames(final_df_all)=="3"] <- "meal03"
+    final_df_all = final_df_all%>%  separate(studyid_time, c("study_id", "time_mins"))
+
+    #store answer 
+    # print(final_df_all[i])
+    final_df[,1:2] = final_df_all[,1:2]
+    # final_df[,i*3:(i*3+2)] = final_df_all %>% select(meal01,meal02,meal03)
+
+    #print((i*3):(i*3+2))
+    final_df[,(i*3):(i*3+2)] = final_df_all[,3:5]
+
+}
+
+glimpse(final_df)
+any(duplicated(names(final_df))) #tested if colnames are unique FALSE --is wat u want
+
+# mapply(function(X,Y) {
+#   sapply(1:10, function(row) cor(X[row,], Y[row,]))
+#   }, X=listA, Y=listB)
+
+# mapply(function(x,y){paste("meal", sprintf("%02d", var_num), min_names)}, x = var_num, y = min_names)
+
+final_df
+
+```
+
+Reorder the time into 30-60-120-240
+```{r}
+ final_df$study_id = as.integer(final_df$study_id)
+final_df$time_mins = as.character(final_df$time_mins)
+final_df$time_mins = as.numeric(final_df$time_mins)
+# final_df$meal03_uridine = as.integer(final_df$meal03_uridine)
+glimpse(final_df)
+
+final_df=final_df %>%  mutate(final_df, time_mins_st = factor(time_mins, levels = c("30", "60", "120", "240")))   %>%  group_by(study_id) 
+final_df =final_df %>%  group_by(study_id) %>%  arrange(study_id,time_mins_st)
+```
+
+
+DO THIS PART THE LAST: omit and create avg col 
+```{r}
+final_df= na.omit(final_df)
+final_df =final_df %>%  group_by(study_id) %>%  mutate(avg_time = mean(time_mins))
+glimpse(final_df)
+
+```
+
+```{r}
+final_df <- as.data.frame(lapply(final_df, unlist))
+
+
+final_df =as.data.frame(final_df)
+class(final_df)
+glimpse(final_df)
+final_df_copy = final_df
+```
+
+```{r}
+mini_df_list = list()
+final_df4 = as.data.frame(final_df[3:34])
+colnames(final_df4)
+positions <- c(22:24)
+df_plot = final_df4 %>% select(positions)
+colnames(df_plot)
+new_minidf = cbind(final_df[1:2], df_plot) 
+colnames(new_minidf)
+lt <- c("meal02" = "dash", "meal01" = "dotted","meal03" = "solid" )
+p = ggplot(new_minidf, aes(study_id)) +     
+  geom_line(aes(y = colnames(new_minidf[4]), linetype = "meal01",color = "red", group=1, )) + #mela 02 
+ geom_line(aes(y = colnames(new_minidf[5]), linetype = "meal03",color = "green", group=1)) +  #meal 03 
+  geom_line(aes(y = colnames(new_minidf[3]), linetype = "meal02", color = "blue",group=1)) #meal 01
+    
+
+
+```
+
+
+
+# Mini DF
+```{r}
+final_df3 <- final_df %>% dplyr:: select(time_mins, study_id,starts_with("meal03"))
+glimpse(final_df3)
+dim(final_df3)
+final_df3[1:2]
+colnames(final_df3[3:34])
+mini_df_list = list()
+final_df4 = as.data.frame(final_df3[3:34])
+colnames(final_df4[1:3])
+
+
+```
+
+
+*Best Link function*
+```{r,cache=TRUE}
+positions <- seq(1:32)
+final_df5 =final_df4 %>% select(positions)
+colnames(final_df5)
+new_minidf = cbind(final_df3[1:2], final_df5) 
+link_fun = vector(mode="list", length=length(positions))
+
+# get the AIC  for all link functions 
+class_lat = c(2,3)
+link_vec = c("splines","beta")
+for(i in 1:length(positions)){
+    link_fun[[i]]<-rep(NA,2)
+  for(k in 1:length(link_vec)){
+    names(new_minidf)[3] <- "metab"
+    new_minidf[,3] = final_df5[i]
+    init = lcmm(metab ~time_mins, subject = "study_id", link = link_vec[k],random  = ~time_mins,
+                data = new_minidf)
+     link_fun[[i]][k]  <-  init$AIC
+  }
+}
+
+link_fun
+
+# Get the best latent class for initial model 
+min_aic2 = list()
+best_link =  data.frame(matrix(NA, ncol = length(link_fun)))
+colnames(best_link) = paste("M-", 1:length(positions), sep = "")
+for(i in 1:length(link_fun)){
+    names(link_fun[[i]]) <- link_vec
+    min_aic2[[i]] = which.min(link_fun[[i]])
+    best_link[,i] =  link_vec[as.numeric(min_aic2[[i]])]
+}
+best_link
+
+
+
+#Get the best Number of latent class *
+
+output_aic_f = vector(mode="list", length=length(positions))
+
+class_lat = c(2,3)
+# link_vec = c("splines","beta")
+for(i in 1:length(positions)){
+    link_fun[[i]]<-rep(NA,2)
+     for(c in 1:length(class_lat)){
+     names(new_minidf)[3] <- "metab"
+     new_minidf[,3] = final_df5[i]
+     init = lcmm(metab ~time_mins, subject = "study_id", link = as.character(best_link[i]),
+                 random  = ~time_mins,
+               data = new_minidf)
+   
+    mond = lcmm(metab ~time_mins, random  = ~time_mins, mixture = ~time_mins, 
+                   ng= as.numeric(class_lat[c]), B = init,
+               subject = "study_id", link = as.character(best_link[i]),data = new_minidf)
+      
+    output_aic_f[[i]][c]  <-  mond$AIC
+
+
+  }
+}
+
+output_aic_f
+
+
+save(output_aic_f, file="output_aic_f.RData")
+load("~/Documents/repos/Dissertation_F/Dissertation-F/output_aic_f.RData")
+
+
+min_aic_class  = list()
+best_df =  data.frame(matrix(NA, ncol = length(output_aic_f)))
+colnames(best_df) = paste("M-", 1:length(positions),sep = "")
+for(i in 1:length(output_aic_f)){
+    names(output_aic_f[[i]]) <- class_lat
+    min_aic_class[[i]] = which.min(output_aic_f[[i]])
+    best_df[,i] =  paste(best_link[[i]], class_lat[as.numeric(min_aic_class[[i]])],sep = "-")
+}
+best_df 
+class(best_df)
+save(best_df, file="labels_summary_FINAL.RData")
+load("~/Documents/repos/Dissertation_F/Dissertation-F/labels_summary_FINAL.RData")
+
+
+
+
+subset(best_df, grepl('^beta', 
+                      best_df))
+best_df[,grepl('^beta', best_df)]
+
+class_two = best_df[,grepl('2$', best_df)]
+length(class_two)
+beta2 = class_two[,grepl('^beta', class_two)]
+length(beta2)
+
+spline2= class_two[,grepl('^splines', class_two)]
+length(splines2)
+
+
+
+class_three  = best_df[,grepl('3$', best_df)]
+length(class_three)
+beta3= class_three[,grepl('^beta', class_three)]
+length(beta3)
+spline3 = class_three[,grepl('^splines', class_three)]
+length(spline3)+length(spline2)
+length(beta2)+length(beta3)
+
+best_link_f = as.numeric(gsub('[[:alpha:]]+[-]',"", best_df))
+length(best_link_f)
+length(positions)
+best_link[1]
+
+```
+
+#final 
+```{r}
+output_final = vector(mode="list", length=length(positions))
+for(i in 1:length(positions)){
+     names(new_minidf)[3] <- "metab"
+     new_minidf[,3] = final_df5[i]
+     init = lcmm(metab ~time_mins, subject = "study_id", link = as.character(best_link[i]),
+                 random  = ~time_mins,
+               data = new_minidf)
+   
+    mond = lcmm(metab ~time_mins, random  = ~time_mins, mixture = ~time_mins, 
+                   ng= as.numeric(best_link_f[i]), B = init,
+               subject = "study_id", link = as.character(best_link[i]),data = new_minidf)
+      
+      output_final[[i]]  <-  mond
+}
+
+ output_final
+# save(output_final, file="output_final.RData")
+#load("~/Documents/repos/Dissertation_F/Dissertation-F/output_final.RData")
+
+
+```
+
+
+```{r}
+#load("~/Documents/repos/Dissertation_F/Dissertation-F/labels_summary_FINAL.RData")
+best_df
+
+#load("~/Documents/repos/Dissertation_F/Dissertation-F/output_final.RData")
+output_final
+
+new_minidf
+```
+
+
+
+
+*Metab 01:metab == meal03._diaminopimelic_acid*
+```{r}
+#mod 1
+init1.0 = lcmm(metab ~time_mins, subject = "study_id", link = "beta",
+                 random  = ~time_mins,
+               data = new_minidf)
+summary(init1.0)
+
+#mod 2
+init2.0  = lcmm(metab ~time_mins, subject = "study_id", link = "splines",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+  
+
+summary(init2.0)
+
+
+#mond3
+init3.0 = lcmm(metab ~time_mins, subject = "study_id", link = "3-quant-splines",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+mond3 = lcmm( metab~time_mins, random  = ~time_mins, mixture = ~time_mins, 
+                   ng= 2, B = init3.0,
+               subject = "study_id", link = "beta",data = new_minidf)
+
+summary(mond3)
+
+
+#mond4
+init4.0  = lcmm(metab ~time_mins, subject = "study_id", link = "5-quant-splines",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+
+
+
+
+init_linkfunc =summarytable(init1.0, init2.0,init3.0, init4.0 ,which = c("loglik", "conv", "npm", "AIC"))
+which.min(init_linkfunc[,4])
+order(init_linkfunc[,4])
+
+rep("c",12)
+col <- rainbow(10)
+#cols = viridis(5)
+#library("viridis") 
+plot(init1.0, which="linkfunction", bty='l', ylab= "meal03._diaminopimelic_acid", col=col[1], lwd=2, xlab="underlying latent process Trouble") #beta= red
+plot(init2.0, which="linkfunction", add=TRUE, col=col[2], lwd=2) #splines - orange
+plot(init3.0, which="linkfunction", add=TRUE, col=col[4], lwd=2) #3quant splines green
+plot(init4.0, which="linkfunction", add=TRUE, col=col[7], lwd=2)#5 quantsplines - dark blue
+
+legend(x="topleft", legend=c("beta", "splines","splines (3equidistant)","splines (5 at quantiles)"), lty=1, col= c(col[1], col[2],col[4],col[7]), bty="n", lwd=2)
+linkbeta <- predictlink(init1.0, ndraws = 2000)
+plot(linkbeta, add = TRUE, col = col[4], lty = 2)
+legend(legend = c("95% confidence bands", "for splines at quantiles"),
+           x = "left", lty = c(2, NA), col = c(col[4], NA), bty = "n", lwd = 1)
+
+
+
+#The best link function based on model ini1.0 
+
+#mod 1: 2 latent classes with beta latent process
+init1.0 = lcmm(metab ~time_mins, subject = "study_id", link = "beta",
+                 random  = ~time_mins,
+               data = new_minidf)
+summary(init1.0)
+
+two_class_metab1 = lcmm( metab~time_mins, random  = ~time_mins, mixture = ~time_mins, 
+                   ng= 2, B = init1.0,
+               subject = "study_id", link = "beta",data = new_minidf)
+
+summary(two_class_metab1)
+postprob(two_class_metab1)
+#mod 2: 3 latent classes with beta latent process 
+init2.0  = lcmm(metab ~time_mins, subject = "study_id", link = "beta",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+    
+
+three_class_metab1 = lcmm( metab~time_mins, random  = ~time_mins, mixture = ~time_mins, 
+                   ng= 3, B = init2.0,
+               subject = "study_id", link = "beta",data = new_minidf)
+
+summary(three_class_metab1)
+postprob(three_class_metab1)
+
+
+mult_classA = summarytable(two_class_metab1,three_class_metab1,which = c("G","loglik", "npm", "AIC", "%class"))
+
+  #summarytable(two_class_metab1,three_class_metab1,which = c("loglik", "conv", "npm", "AIC"))
+which.min(mult_classA[,3])
+order(mult_classA[,3])
+
+postprob(two_class_metab1)
+postprob(three_class_metab1)
+col <- rainbow(10)
+#Predictions  based on both best AIC & Link 
+mond1pred<- predictlink(two_class_metab1,ndraws=2000)
+plot(mond1pred, col=col[4], lty=2, shades=TRUE)
+legend(x="left", legend=c("95% confidence bands","for splines at quantiles"),lty=c(2,NA), col=c(col[4],NA), bty="n", lwd=1, cex=0.8)
+plot(two_class_metab1,cex.main=0.9)
+
+
+#Class trajectories based on both best AIC & Link 
+new_data_time= data.frame(timepred= seq(30,240,by=5)) ##  USE THIS FROM NOW ON 
+new_data_time$time_mins = new_data_time$timepred
+
+predG1 = predictY(init1.0,newdata= new_data_time, var.time = "timepred")
+predG2=predictY(two_class_metab1,newdata= new_data_time, var.time = "timepred")
+predG3=predictY(three_class_metab1,newdata= new_data_time, var.time = "timepred")
+
+par(mfrow = c(1,3))
+plot(predG1, col = 1, lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL, main = "Predicted trajectories G=1", xlim = c(0,300))
+plot(predG2, col = c("red", "navy"), lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL,main = "Predicted trajectories G=2", xlim = c(0,300))
+plot(predG3, col = 2:4, lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL,main = "Predicted trajectories G=3", xlim = c(0,300))
+
+
+
+
+###OTHER METHOD FOR CLASS SPECIFIC TRAJ with CI bands: 3 LC
+predG1.1 = predictY(init1.0,newdata= new_data_time, var.time = "timepred", draws = T)
+
+predG2.2=predictY(two_class_metab1,newdata= new_data_time, var.time = "timepred", draws = T)
+predG3.3=predictY(three_class_metab1,newdata= new_data_time, var.time = "timepred", draws = T)
+
+
+# plot(predG2,lwd = c(3, 1),xlab = "Time Minutes: Simple Metab 01", ylab = "Latent Process: Simple Metab 01")
+
+par(mfrow = c(1,1))
+plot(predG2.2, col = c("red", "navy"), lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL)
+legend(x = "bottomright", legend = c("class 1", "Time Lower ", "time upper", "class 2","Time Lower ", "time upper" ), col = c(rep("red",3), rep("navy",3)), lwd = 2, lty = c(0,1,2,0,1,2), ncol =2, bty = "n", cex = 0.7)
+
+
+plot(predG3.3, lwd = c(3, 1),xlab = "Time Minutes: Simple Metab 01", ylab = "Metab 01", c("red", "navy", "green"), legend = NULL)
+legend(x = "bottomright", legend = c("class 1", "Time Lower ", "time upper", "class 2","Time Lower ", "time upper", "class 3","Time Lower ", "time upper"  ), col = c(rep("red",3), rep("navy",3),rep("green",3)), lwd = 2, lty = c(0,1,2,0,1,2,0,1,2), ncol =3, bty = "n", cex = 0.7)
+
+
+
+
+par(mfrow = c(1,3))
+plot(predG1.1, col = 1, lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL, main = "Predicted trajectories G=1", xlim = c(0,300))
+plot(predG2.2, col = c("red", "navy"), lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL,main = "mean  Predicted trajectories G=2", xlim = c(0,300))
+plot(predG3.3, col = 2:4, lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL,main = "meanPredicted trajectories G=3", xlim = c(0,300))
+
+
+postprob(two_class_metab1)
+
+#Weighted mean of predicted trajectories based on both best AIC & Link 
+par(mfrow = c(1,1))
+plot(three_class_metab1, which = "fit", var.time = "time_mins", xlab = "Time in Minutes: Simple Metab 01",
+     bty = "l", break.times = 5, ylab = "three latent process", lwd = 2, marg = FALSE,
+     ylim = c(-8, 2))
+
+
+par(mfrow = c(1,1))
+plot(two_class_metab1, which = "fit", var.time = "time_mins", xlab = "Time in Minutes",
+     bty = "l", break.times = 6, ylab = "two latent process", lwd = 2, marg = FALSE,
+     ylim = c(-8, 2))
+
+
+
+
+#Choosing the best model: Label switching look 
+
+label_switching = summarytable(init1.0,two_class_metab1,three_class_metab1, which = c("G", "loglik", "conv", "npm", "AIC", "BIC", "SABIC", "entropy","ICL", "%class"))
+
+
+
+summaryplot(init1.0,two_class_metab1,three_class_metab1,which = c("AIC", "BIC", "entropy","ICL"))
+
+order(label_switching[,5])
+order(label_switching[,7])
+
+
+
+
+
+
+
+
+```
+
+
+
+
+*Metab 02:meal03._alpha_l_fucose*
+```{r}
+
+#mod 1
+init1.0b = lcmm(meal03._alpha_l_fucose ~time_mins, subject = "study_id", link = "beta",
+                 random  = ~time_mins,
+               data = new_minidf)
+summary(init1.0b)
+#mod 2
+init2.0b  = lcmm( meal03._alpha_l_fucose ~time_mins, subject = "study_id", link = "splines",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+    
+#mond3
+init3.0b = lcmm( meal03._alpha_l_fucose ~time_mins, subject = "study_id", link = "3-quant-splines",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+
+#mond4
+init4.0b  = lcmm(meal03._alpha_l_fucose  ~time_mins, subject = "study_id", link = "5-quant-splines",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+
+
+init_linkfunc_b =summarytable(init1.0b, init2.0b,init3.0b, init4.0b ,which = c("loglik", "conv", "npm", "AIC"))
+which.min(init_linkfunc_b[,4])
+order(init_linkfunc_b[,4])
+
+
+col <- rainbow(10)
+
+plot(init1.0b, which="linkfunction", bty='l', ylab= "meal03._alpha_l_fucose", col=col[1], lwd=2, xlab="underlying latent process Trouble") #beta= red
+plot(init2.0b, which="linkfunction", add=TRUE, col=col[2], lwd=2) #splines - orange
+plot(init3.0b, which="linkfunction", add=TRUE, col=col[4], lwd=2) #3quant splines green
+plot(init4.0b, which="linkfunction", add=TRUE, col=col[7], lwd=2)#5 quantsplines - dark blue
+
+legend(x="topleft", legend=c("beta", "splines","splines (3equidistant)","splines (5 at quantiles)"), lty=1, col= c(col[1], col[2],col[4],col[7]), bty="n", lwd=2)
+
+
+#The best link function based on model ini1.0 
+
+#mod 1
+init2.0b  = lcmm( meal03._alpha_l_fucose ~time_mins, subject = "study_id", link = "splines",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+summary(init2.0b)
+
+two_class_metab2 = lcmm( meal03._alpha_l_fucose ~time_mins, random  = ~time_mins, mixture = ~time_mins, 
+                   ng= 2, B = init2.0b,
+               subject = "study_id", link = "splines",data = new_minidf)
+
+summary(two_class_metab2)
+postprob(two_class_metab2)
+#mod 2
+#mod 1
+init2.0b  = lcmm( meal03._alpha_l_fucose ~time_mins, subject = "study_id", link = "splines",
+                 random  = ~time_mins,
+               data = new_minidf)
+
+summary(init2.0b)
+    
+
+three_class_metab2 = lcmm( metab~time_mins, random  = ~time_mins, mixture = ~time_mins, 
+                   ng= 3, B = init2.0b,
+               subject = "study_id", link = "splines",data = new_minidf)
+
+summary(three_class_metab2)
+postprob(three_class_metab2)
+
+mult_classB =summarytable(two_class_metab2,three_class_metab2,which = c("G","loglik", "npm", "AIC", "%class"))
+which.min(mult_classB[,3])
+order(mult_classB[,4])
+
+col <- rainbow(10)
+#Predictions  based on both best AIC & Link 
+mond1pred_b<- predictlink(two_class_metab2,ndraws=2000)
+plot(mond1pred_b, col=col[4], lty=2, shades=TRUE)
+legend(x="left", legend=c("95% confidence bands","for splines at quantiles"),lty=c(2,NA), col=c(col[4],NA), bty="n", lwd=1, cex=0.8)
+plot(two_class_metab2,cex.main=0.9)
+
+
+#Class trajectories based on both best AIC & Link 
+new_data_time= data.frame(timepred= seq(30,240,by=5)) ##  USE THIS FROM NOW ON 
+new_data_time$time_mins = new_data_time$timepred
+pred_meta_1 = predictY(init2.0b,newdata= new_data_time, var.time = "timepred")
+pred_met_2=predictY(two_class_metab2,newdata= new_data_time, var.time = "timepred")
+pred_met_3=predictY(three_class_metab2,newdata= new_data_time, var.time = "timepred")
+
+
+
+
+
+
+par(mfrow = c(1,3))
+plot(pred_meta_1, col = 1, lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL, main = "Predicted trajectories G=1", xlim = c(0,300))
+plot(pred_met_2, col = c("red", "navy"), lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL,main = "mean  Predicted trajectories G=2", xlim = c(0,300))
+plot(pred_met_3, col = 2:4, lty = 1, lwd = 2, ylab = "Metab 01", legend = NULL,main = "meanPredicted trajectories G=3", xlim = c(0,300))
+
+
+
+#Weighted mean of predicted trajectories based on both best AIC & Link 
+class(predG2$times)
+
+plot(pred_met_2,lwd = c(3, 1),xlab = "Time Minutes: Trouble Metab 02", ylab = "Latent Process: Trouble  Metab 02")
+plot(pred_met_3, lwd = c(3, 1),xlab = "Time Minutes: Trouble Metab 02", ylab = "Latent Process: Trouble Metab 02")
+
+
+
+#Goodness of Fit || col= c(col[2], col[4], col[7])
+plot(three_class_metab2, which = "fit", var.time = "time_mins", xlab = "Time in Minutes: Complex Metab 02",
+     bty = "l", break.times = 5, ylab = "latent process", lwd = 2, marg = FALSE,
+     ylim = c(-5, 2))
+
+
+label_switching2 = summarytable(init2.0b,two_class_metab2,three_class_metab2, which = c("G", "loglik", "conv", "npm", "AIC", "BIC", "SABIC", "entropy","ICL", "%class"))
+
+summaryplot(init2.0b,two_class_metab2,three_class_metab2,which = c("AIC", "BIC", "entropy","ICL"))
+label_switching2
+order(label_switching2[,5])
+order(label_switching2[,6])
+order(label_switching2[,7])
+
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!--chapter:end:ReviewAll.Rmd-->
+
